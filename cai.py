@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+from scipy.stats import pearsonr
+import matplotlib.pyplot as plt
 
 # -------------------- Constants --------------------
 
@@ -169,12 +171,59 @@ if __name__ == "__main__":
         df.dropna(subset=["PA1"])
         .sort_values(by="PA1", ascending=False)
         .head(294)
-        .reset_index(drop=True)
     )
 
     cai = CodonAdaptationIndex()
     cai.fit(top_5pc_PA1["CDS"])
 
-    print(cai.score(df["CDS"]))
+    cai_scores = cai.score(df["CDS"])
 
+    df["CAI"] = cai_scores
     
+    train_orfs = set(top_5pc_PA1["ORF_ID"])
+
+    # Correlation calculation (log Pearson's)
+    print("Correlation between CAI scores and protein abundance measurements:")
+    for pa in ["PA1", "PA2", "PA3"]:
+        # Drop rows missing CAI or this PA measurement. Keep positive PA for log10
+        valid = df.dropna(subset=["CAI", pa])
+        valid = valid[valid[pa] > 0]
+
+        r, p = pearsonr(valid["CAI"], np.log10(valid[pa]))
+        print(f"{pa}:(n = {len(valid)}) r = {r:.4f}, p = {p:.2e}")
+
+        if pa == "PA1":
+            unseen = valid[~valid["ORF_ID"].isin(train_orfs)]
+            r_u, p_u = pearsonr(unseen["CAI"], np.log10(unseen[pa]))
+            print(f"{pa}: (excluding training data. n = {len(unseen)}), r = {r_u:.4f}, p = {p_u:.2e}")
+        
+
+    # Dot Plots
+    fig, axes = plt.subplots(1, 3, figsize=(16,5))
+
+    for ax, pa in zip(axes, ["PA1", "PA2", "PA3"]):
+        valid = df.dropna(subset=["CAI", pa])
+        valid = valid[valid[pa] > 0]
+
+        x = valid["CAI"].to_numpy()
+        y = np.log10(valid[pa].to_numpy())
+        r, p = pearsonr(x, y)
+
+        ax.scatter(x, y, s=12, alpha=0.35, color="blue", edgecolors="none", label="Genes")
+        slope, intercept = np.polyfit(x, y, 1)
+        x_line  = np.linspace(x.min(), x.max(), 200)
+        ax.plot(
+            x_line,
+            slope * x_line + intercept,
+            color="red",
+            linewidth=2,
+            label=f"Fit: r = {r:.3f} (n={len(valid)})",
+        )
+
+        ax.set_title(f"CAI vs. log10({pa})")
+        ax.set_xlabel("CAI")
+        ax.set_ylabel(f"log10({pa})")
+        ax.grid(True, linestyle="--", alpha=0.3)
+    
+    fig.suptitle("Yeast CAI vs. Log10 Protein Abundance (PA1, PA2, PA3)")
+    plt.show()
